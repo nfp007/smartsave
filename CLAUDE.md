@@ -39,6 +39,7 @@ tools/valheim_il.py  list members / disassemble methods of assembly_valheim.dll
 - SmartSave's own saves call `SaveScheduler.SaveNow`, which **restores `Game.m_saveTimer`** afterwards. On a host that timer drives the world save. Never call `SavePlayerProfile` directly from new code.
 - The logout point (`setLogoutPoint: true`) is only set when `SafetyState.IsLogoutSafe` is true.
 - The explored map is the slow part of a save (~85-90%). SmartSave's saves include it only as `MapSave` says (`SaveScheduler.IncludeMap`). The manual key always includes it. Never skip it in vanilla saves.
+- `FastMapData` must produce exactly what `Minimap.GetMapData` produces. After a game update, compare with `tools/valheim_il.py il <dll> Minimap::GetMapData`. The runtime self-check switches it off on any difference, but then the speed-up is gone.
 - Recipe, forsaken power and skill triggers are ignored for 10 s after login (loading the character fires them).
 - Saves are not free (loading-screen push, Steam Cloud mount). Don't add triggers that fire per item or per frame. Merge them through `SaveScheduler.Request(reason, prio, wantLogout, delay)`.
 - New trigger checklist: add a `Reason` flag → add a config entry in `Plugin.cs` (section `Triggers`, with a clear description) → add the patch in `Patches.cs` → document it in the README table, `docs/DESIGN.md` section 4 and `CHANGELOG.md`.

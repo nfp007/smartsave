@@ -25,6 +25,34 @@ namespace SmartSave
         }
 
         /// <summary>
+        /// Faster map data build (FastMapSave). Until the first check against vanilla has passed, vanilla runs too
+        /// and the two results are compared in the postfix.
+        /// </summary>
+        [HarmonyPatch(typeof(Minimap), "GetMapData")]
+        private static class Minimap_GetMapData
+        {
+            private static bool Prefix(Minimap __instance, ref byte[] __result, out byte[] __state)
+            {
+                __state = null;
+                if (!FastMapData.Enabled) return true;
+                var fast = FastMapData.TryBuild(__instance);
+                if (fast == null) return true;
+                if (FastMapData.Verified)
+                {
+                    __result = fast;
+                    return false;
+                }
+                __state = fast;
+                return true;
+            }
+
+            private static void Postfix(byte[] __result, byte[] __state)
+            {
+                if (__state != null) FastMapData.Verify(__state, __result);
+            }
+        }
+
+        /// <summary>
         /// The server tells every client to save (ZNet.SaveOtherPlayerProfiles). Vanilla always moves the logout point.
         /// In combat (or mid-air, swimming...) we save the inventory but keep the old logout point.
         /// </summary>

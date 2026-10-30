@@ -28,6 +28,13 @@ namespace SmartSave
         Never,
     }
 
+    public enum SaveMessageMode
+    {
+        Off,
+        Important,
+        All,
+    }
+
     internal enum Prio
     {
         None = 0,
@@ -247,7 +254,7 @@ namespace SmartSave
 
             if (Plugin.LogSaves.Value)
                 Plugin.Log.LogInfo($"saved (reason={ReasonText(reason)}, logoutPoint={setLogout}, map={(includeMap ? "yes" : "skipped")})");
-            if (forceMessage || Plugin.ShowSaveMessage.Value)
+            if (forceMessage || WantsMessage(reason))
                 Message(setLogout ? "SmartSave: saved" : "SmartSave: saved (position not updated)");
 
             MaybeRequestWorldSave(reason);
@@ -277,6 +284,18 @@ namespace SmartSave
             _lastWorldSaveRequest = Time.time;
             rpc.Invoke("Save");
             if (Plugin.LogSaves.Value) Plugin.Log.LogInfo("asked the server to save the world");
+        }
+
+        private const Reason ImportantForMessage = Reason.Craft | Reason.Inventory | Reason.Tombstone | Reason.Boss | Reason.Manual;
+
+        private static bool WantsMessage(Reason reason)
+        {
+            switch (Plugin.SaveMessage.Value)
+            {
+                case SaveMessageMode.All: return true;
+                case SaveMessageMode.Important: return (reason & ImportantForMessage) != 0;
+                default: return false;
+            }
         }
 
         /// <summary>F6 always saves everything; otherwise the MapSave setting decides.</summary>

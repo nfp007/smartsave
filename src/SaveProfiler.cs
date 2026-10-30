@@ -63,8 +63,9 @@ namespace SmartSave
         internal static void Init(Harmony harmony)
         {
             if (!Plugin.Profiling.Value) return;
-            var prefix = new HarmonyMethod(AccessTools.Method(typeof(SaveProfiler), nameof(PartPrefix)));
-            var postfix = new HarmonyMethod(AccessTools.Method(typeof(SaveProfiler), nameof(PartPostfix)));
+            // First/last, so the timing wraps other mods' patches and still runs when a prefix skips the original.
+            var prefix = new HarmonyMethod(AccessTools.Method(typeof(SaveProfiler), nameof(PartPrefix))) { priority = Priority.First };
+            var postfix = new HarmonyMethod(AccessTools.Method(typeof(SaveProfiler), nameof(PartPostfix))) { priority = Priority.Last };
             int ok = 0;
             foreach (var (label, typeName, methodName) in Targets)
             {

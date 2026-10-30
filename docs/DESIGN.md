@@ -106,6 +106,19 @@ Profiling (0.1.1, `[Debug] Profiling`) on a real game, explored map 2048×2048:
 
 Trade-off: after a crash, map exploration and pins since the last save that wrote the map can be lost. Items, skills and recipes cannot.
 
+### Faster map build (FastMapSave)
+
+`Minimap.GetMapData` is replaced by `FastMapData.Build` (prefix on `GetMapData`), which writes the same data:
+
+- outer `ZPackage`: `int 8` (version), then the compressed inner package,
+- inner: `int m_textureSize`, `m_explored` as one byte (0/1) per bit, `m_exploredOthers` the same (vanilla loops to `m_explored.Length` for both), `int` count of pins with `m_save`, per pin `string m_name`, `Vector3 m_pos`, `int m_type`, `bool m_checked`, `long m_ownerID`, `string m_author.ToString()`, then `bool ZNet.IsReferencePositionPublic()`.
+
+The difference: the bits are expanded with `BitArray.CopyTo(int[])` into one reused byte buffer and written with a single `BinaryWriter.Write(byte[], 0, n)` into a pre-sized `MemoryStream`. Vanilla calls `ZPackage.Write(bool)` once per bit and lets the stream grow.
+
+Measured (0.3.0, Steam Cloud character): `GetMapData` 48–49 ms, of which compression ~39 ms. The bulk build itself is ~10 ms, compared with ~140–230 ms for vanilla's bool-by-bool loop. The first map save per start runs both versions for the check (~290 ms). Whole save with map on Steam Cloud: 170–315 ms (was 290–400). Local with map, estimated from the parts: ~70 ms.
+
+Self-check: until it is verified, the first `GetMapData` call per game start runs both versions. The postfix decompresses both results and compares them byte by byte. Identical → the fast version is used from then on. Different, or any exception → switched off until restart, with a log warning. This catches game updates and mods that change the map data.
+
 ### Saving must not delay the world save
 
 SmartSave stores `Game.m_saveTimer` before its own `SavePlayerProfile` call and restores it afterwards. This keeps the host's world save on schedule. The server-push path keeps the vanilla behaviour.

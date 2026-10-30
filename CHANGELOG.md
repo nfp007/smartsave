@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0
+- Faster map save (`FastMapSave`, on by default): the explored map data is built in one go instead of one point at a time (~10 ms instead of ~140-230 ms, plus compression). Every save that writes the map gets faster, including the game's own saves. The result is the same as the game's; the first map save after each game start builds it both ways and compares them, and the faster version is switched off with a log warning if they ever differ.
+- `SaveMessage` setting (`Off` by default, `Important` or `All`) replaces `ShowSaveMessage`.
+
 ## 0.2.0
 - Much shorter freeze: SmartSave's saves no longer write the explored map every time. The map is about 85-90% of a save (with a local character a save takes ~20 ms instead of ~200-280 ms).
   New setting `MapSave`: `OnPortal` (default, only the save right before a teleport writes the map), `Always` or `Never`.

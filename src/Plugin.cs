@@ -17,13 +17,14 @@ namespace SmartSave
     {
         public const string Guid = "nfp007.SmartSave";
         public const string Name = "SmartSave";
-        public const string Version = "0.2.0";
+        public const string Version = "1.0.0";
 
         internal static Plugin Instance;
         internal static ManualLogSource Log;
 
         // [General]
-        internal static ConfigEntry<bool> Enabled, LogSaves, ShowSaveMessage;
+        internal static ConfigEntry<bool> Enabled, LogSaves, FastMapSave;
+        internal static ConfigEntry<SaveMessageMode> SaveMessage;
         internal static ConfigEntry<float> MinSaveIntervalSec;
         internal static ConfigEntry<KeyboardShortcut> ManualSaveKey;
         internal static ConfigEntry<MapSaveMode> MapSave;
@@ -54,7 +55,11 @@ namespace SmartSave
 
             Enabled = Config.Bind("General", "Enabled", true, "Turn SmartSave on or off.");
             LogSaves = Config.Bind("General", "LogSaves", true, "Write a line to the BepInEx log for every save (with the reason).");
-            ShowSaveMessage = Config.Bind("General", "ShowSaveMessage", false, "Show a small \"Saved\" message top left after each SmartSave save.");
+            SaveMessage = Config.Bind("General", "SaveMessage", SaveMessageMode.Off,
+                "Show a small \"Saved\" message top left after SmartSave saves.\n" +
+                "  Off       = no message (the manual save key always shows one).\n" +
+                "  Important = only after crafting, chest changes, the tombstone and a boss / forsaken power.\n" +
+                "  All       = after every SmartSave save.");
             MinSaveIntervalSec = Config.Bind("General", "MinSaveIntervalSec", 15f,
                 "Minimum seconds between two normal saves. Important saves (crafting, chests, tombstone, teleport, manual) ignore it.");
             ManualSaveKey = Config.Bind("General", "ManualSaveKey", new KeyboardShortcut(KeyCode.F6),
@@ -62,14 +67,22 @@ namespace SmartSave
 
             MapSave = Config.Bind("General", "MapSave", MapSaveMode.OnPortal,
                 "When SmartSave's saves also write your explored map. The map is by far the slowest part of a save.\n" +
-                "Measured on a normal PC: a save with the map freezes the game for about 200-280 ms with a local character\n" +
-                "and 300-400 ms with a Steam Cloud character. Without the map it takes about 20 ms locally\n" +
-                "(about 100 ms with Steam Cloud).\n" +
+                "Measured on a normal PC (with FastMapSave on): a save with the map freezes the game for about 70 ms with a\n" +
+                "local character and 170-270 ms with a Steam Cloud character. Without the map it takes about 20 ms locally\n" +
+                "(about 110-140 ms with Steam Cloud).\n" +
                 "  OnPortal = only the save right before a teleport writes the map (the screen fades out anyway).\n" +
                 "  Always   = every SmartSave save writes the map: nothing of the map is ever lost, but every save freezes.\n" +
                 "  Never    = SmartSave never writes the map.\n" +
                 "The game's own saves (server save interval, logout) and the manual save key always write the map.\n" +
                 "Without the map, a crash can lose map exploration and new pins since the last save that wrote it. Never items.");
+
+            FastMapSave = Config.Bind("General", "FastMapSave", true,
+                "Build the explored map data much faster whenever it is saved (by SmartSave and by the game's own saves).\n" +
+                "Safeguard: the first map save after each game start builds the map data both ways (SmartSave's and the game's)\n" +
+                "and compares them byte by byte. Only if they are identical is the faster version used for the rest of the session.\n" +
+                "If they differ (after a game update, or because another mod changes the map data), SmartSave switches back to\n" +
+                "the game's own method and writes a warning to the log. Because of the check, that first map save takes ~300 ms once.\n" +
+                "If another map mod misbehaves (pins or map not saved as expected), set this to false.");
 
             SaveAfterCrafting = Config.Bind("Triggers", "SaveAfterCrafting", true,
                 "Save after crafting, upgrading or repairing, as soon as the crafting window is closed.");
