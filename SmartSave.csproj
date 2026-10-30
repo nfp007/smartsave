@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- SmartSave: saves your Valheim character when it matters (client-side).
+       Build:  dotnet build -c Release
+       Game DLLs (valheim_Data/Managed), first match wins:
+         1. -p:GameLib=<path>\  on the command line
+         2. GameLib in local.props (not committed, see BUILDING.md)
+         3. lib/valheim/
+         4. the default Steam install path -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>SmartSave</AssemblyName>
+    <RootNamespace>SmartSave</RootNamespace>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <Version>0.1.0</Version>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AutomaticallyUseReferenceAssemblyPackages>false</AutomaticallyUseReferenceAssemblyPackages>
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+    <NoStdLib>true</NoStdLib>
+    <CoreLib>$(MSBuildThisFileDirectory)lib/core/</CoreLib>
+  </PropertyGroup>
+  <Import Project="local.props" Condition="Exists('$(MSBuildThisFileDirectory)local.props')" />
+  <PropertyGroup Condition="'$(GameLib)' == '' And Exists('$(MSBuildThisFileDirectory)lib/valheim/assembly_valheim.dll')">
+    <GameLib>$(MSBuildThisFileDirectory)lib/valheim/</GameLib>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(GameLib)' == ''">
+    <GameLib>C:\Program Files (x86)\Steam\steamapps\common\Valheim\valheim_Data\Managed\</GameLib>
+  </PropertyGroup>
+  <PropertyGroup>
+    <FrameworkPathOverride>$(GameLib)</FrameworkPathOverride>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="mscorlib"><HintPath>$(GameLib)mscorlib.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="netstandard"><HintPath>$(GameLib)netstandard.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System"><HintPath>$(GameLib)System.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Core"><HintPath>$(GameLib)System.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="assembly_valheim"><HintPath>$(GameLib)assembly_valheim.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="assembly_utils"><HintPath>$(GameLib)assembly_utils.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Splatform"><HintPath>$(GameLib)Splatform.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>$(GameLib)UnityEngine.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(GameLib)UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.PhysicsModule"><HintPath>$(GameLib)UnityEngine.PhysicsModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.InputLegacyModule"><HintPath>$(GameLib)UnityEngine.InputLegacyModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="BepInEx"><HintPath>$(CoreLib)BepInEx.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>$(CoreLib)0Harmony.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,23 @@
+# build output
+bin/
+obj/
+build/
+package/*.zip
+
+# game and BepInEx DLLs (copyrighted, never commit)
+lib/
+
+# local build settings (game path)
+local.props
+
+# IDE
+.vs/
+.vscode/
+*.user
+
+# python
+__pycache__/
+*.pyc
+
+# packaged dll
+package/SmartSave/plugins/*.dll
