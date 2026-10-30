@@ -20,6 +20,14 @@ namespace SmartSave
         Manual = 1 << 10,
     }
 
+    /// <summary>When SmartSave's saves also write the explored map (the slow part of a save).</summary>
+    public enum MapSaveMode
+    {
+        OnPortal,
+        Always,
+        Never,
+    }
+
     internal enum Prio
     {
         None = 0,
@@ -53,13 +61,32 @@ namespace SmartSave
         private static float _nextTick;
         private static bool _savingNow;
 
+        private static bool _skipMapNow;
+        private static bool _inSession;
+        private static float _sessionStart;
+
         internal static bool SavingNow => _savingNow;
 
+        /// <summary>True only during a SmartSave save that leaves the stored map as it is.</summary>
+        internal static bool SkipMapNow => _skipMapNow;
+
+        /// <summary>Reason of the SmartSave save that is running right now (for the profiler).</summary>
+        internal static Reason CurrentReason { get; private set; }
+
         // ---------------------------------------------------------------- requests
+
+        // Loading the character sets known recipes, the forsaken power and skills: not a reason to save.
+        private const Reason LoginNoise = Reason.Recipe | Reason.Boss | Reason.SkillUp;
+        private const float LoginQuietSec = 10f;
 
         internal static void Request(Reason reason, Prio prio, bool wantLogout, float delaySec = 0f)
         {
             if (!Plugin.Enabled.Value) return;
+            if ((reason & LoginNoise) != 0 && (!_inSession || Time.time - _sessionStart < LoginQuietSec))
+            {
+                reason &= ~LoginNoise;
+                if (reason == Reason.None) return;
+            }
             if (_pending == Reason.None) _pendingSince = Time.time;
             _pending |= reason;
             if (prio > _prio) _prio = prio;
@@ -107,6 +134,11 @@ namespace SmartSave
             if (!Plugin.Enabled.Value) return;
             var p = Player.m_localPlayer;
             if (p == null || Game.instance == null) { ResetSession(); return; }
+            if (!_inSession)
+            {
+                _inSession = true;
+                _sessionStart = Time.time;
+            }
 
             // manual key (checked every frame)
             if (!SafetyState.IsTyping() && IsDown(Plugin.ManualSaveKey.Value))
@@ -198,6 +230,9 @@ namespace SmartSave
             // Game.SavePlayerProfile resets Game.m_saveTimer. On a host that timer also drives the world save,
             // so keep it as it was – our saves must never postpone the vanilla world save.
             float timer = game.m_saveTimer;
+            bool includeMap = IncludeMap(reason);
+            CurrentReason = reason;
+            _skipMapNow = !includeMap;
             _savingNow = true;
             try
             {
@@ -206,11 +241,12 @@ namespace SmartSave
             finally
             {
                 _savingNow = false;
+                _skipMapNow = false;
                 game.m_saveTimer = timer;
             }
 
             if (Plugin.LogSaves.Value)
-                Plugin.Log.LogInfo($"saved (reason={reason}, logoutPoint={setLogout})");
+                Plugin.Log.LogInfo($"saved (reason={ReasonText(reason)}, logoutPoint={setLogout}, map={(includeMap ? "yes" : "skipped")})");
             if (forceMessage || Plugin.ShowSaveMessage.Value)
                 Message(setLogout ? "SmartSave: saved" : "SmartSave: saved (position not updated)");
 
@@ -243,10 +279,26 @@ namespace SmartSave
             if (Plugin.LogSaves.Value) Plugin.Log.LogInfo("asked the server to save the world");
         }
 
+        /// <summary>F6 always saves everything; otherwise the MapSave setting decides.</summary>
+        private static bool IncludeMap(Reason reason)
+        {
+            if ((reason & Reason.Manual) != 0) return true;
+            switch (Plugin.MapSave.Value)
+            {
+                case MapSaveMode.Always: return true;
+                case MapSaveMode.Never: return false;
+                default: return (reason & Reason.Teleport) != 0;
+            }
+        }
+
+        /// <summary>"Craft+Inventory" instead of "Craft, Inventory" (no commas: the profiler writes CSV).</summary>
+        internal static string ReasonText(Reason r) => r.ToString().Replace(", ", "+");
+
         // ---------------------------------------------------------------- helpers
 
         private static void ResetSession()
         {
+            _inSession = false;
             _pending = Reason.None;
             _prio = Prio.None;
             _notBefore = 0f;

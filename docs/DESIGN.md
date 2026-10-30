@@ -86,6 +86,26 @@ Requests are merged: reasons are OR-ed into one pending save, and the highest pr
 
 Normal and Low saves that want to move the logout point wait up to 60 s for a safe moment, then save anyway without moving it.
 
+### The map (measured)
+
+Profiling (0.1.1, `[Debug] Profiling`) on a real game, explored map 2048×2048:
+
+| Part | Steam Cloud | Local |
+|---|---|---|
+| Whole `SavePlayerProfile` | 290–400 ms | 190–230 ms |
+| `Minimap.SaveMapData` (map build) | 180–290 ms | 170–205 ms |
+| of which `ZPackage.WriteCompressed` | 44–70 ms | 39–69 ms |
+| `PlayerProfile.SavePlayerToDisk` | 100–115 ms (`FileHelpers.ReplaceOldFile` 70–86) | 10–36 ms (replace ~1.5) |
+| `PlayerProfile.SavePlayerData` | 2–5 ms | 1–2 ms |
+| Temporary memory | ~190–200 MB, 2–3 GCs | ~42 MB |
+| Whole save **without** the map (0.1.2) | ~100–115 ms (estimated from the parts) | 19–21 ms (measured), ~1 MB memory |
+
+`Minimap.GetMapData` writes `m_explored` and `m_exploredOthers` one bool at a time into a `ZPackage` (~8.5 MB), adds the pins, then compresses it (to ~71 KB). `PlayerProfile` keeps the last map bytes per world, so a save that skips `SaveMapData` still writes the previously stored map.
+
+`MapSave` (default `OnPortal`) decides when SmartSave's saves include the map: only the save before a teleport, always, or never. The manual key always includes it, and so do all vanilla saves. A prefix on `Minimap.SaveMapData` returns false while `SaveScheduler.SkipMapNow` is set.
+
+Trade-off: after a crash, map exploration and pins since the last save that wrote the map can be lost. Items, skills and recipes cannot.
+
 ### Saving must not delay the world save
 
 SmartSave stores `Game.m_saveTimer` before its own `SavePlayerProfile` call and restores it afterwards. This keeps the host's world save on schedule. The server-push path keeps the vanilla behaviour.

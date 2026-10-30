@@ -38,6 +38,8 @@ tools/valheim_il.py  list members / disassemble methods of assembly_valheim.dll
 - Every character save goes through `Game.SavePlayerProfile(bool setLogoutPoint, bool isFromRpc)`. Its postfix (`SaveScheduler.OnProfileSaved`) is the single place that clears pending state. Keep it that way.
 - SmartSave's own saves call `SaveScheduler.SaveNow`, which **restores `Game.m_saveTimer`** afterwards. On a host that timer drives the world save. Never call `SavePlayerProfile` directly from new code.
 - The logout point (`setLogoutPoint: true`) is only set when `SafetyState.IsLogoutSafe` is true.
+- The explored map is the slow part of a save (~85-90%). SmartSave's saves include it only as `MapSave` says (`SaveScheduler.IncludeMap`). The manual key always includes it. Never skip it in vanilla saves.
+- Recipe, forsaken power and skill triggers are ignored for 10 s after login (loading the character fires them).
 - Saves are not free (loading-screen push, Steam Cloud mount). Don't add triggers that fire per item or per frame. Merge them through `SaveScheduler.Request(reason, prio, wantLogout, delay)`.
 - New trigger checklist: add a `Reason` flag → add a config entry in `Plugin.cs` (section `Triggers`, with a clear description) → add the patch in `Patches.cs` → document it in the README table, `docs/DESIGN.md` section 4 and `CHANGELOG.md`.
 - Only react to the **local** player (`Player.m_localPlayer`). Patched methods also run for other characters.
@@ -58,6 +60,8 @@ tools/valheim_il.py  list members / disassemble methods of assembly_valheim.dll
 5. Manifest `description` must stay ≤ 250 characters. The dependency is `denikson-BepInExPack_Valheim`.
 
 ## Testing (in game)
+
+For performance, set `[Debug] Profiling = true` (restart needed): every save, SmartSave's and the game's own, gets a log line and a row in `BepInEx/SmartSave_profile.csv` with the total time, each part (map, compression, file write, Steam Cloud), memory and the frames after the save. Give measured times in ms. Keep `Profiling` off by default in releases.
 
 Enable `LogSaves` (default on) and watch `BepInEx/LogOutput.log` for `[Info:SmartSave] saved (reason=…, logoutPoint=…)`:
 - craft and close the station → `Craft`; move items in a chest and close it → `Inventory`; chest to chest quickly → one save

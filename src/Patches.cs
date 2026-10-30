@@ -17,6 +17,13 @@ namespace SmartSave
             private static void Postfix(bool setLogoutPoint) => SaveScheduler.OnProfileSaved(setLogoutPoint);
         }
 
+        /// <summary>SmartSave's saves may leave the stored map as it is (MapSave setting, see SaveScheduler.IncludeMap).</summary>
+        [HarmonyPatch(typeof(Minimap), nameof(Minimap.SaveMapData))]
+        private static class Minimap_SaveMapData
+        {
+            private static bool Prefix() => !SaveScheduler.SkipMapNow;
+        }
+
         /// <summary>
         /// The server tells every client to save (ZNet.SaveOtherPlayerProfiles). Vanilla always moves the logout point.
         /// In combat (or mid-air, swimming...) we save the inventory but keep the old logout point.
