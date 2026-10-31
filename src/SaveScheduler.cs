@@ -253,17 +253,41 @@ namespace SmartSave
             }
 
             if (Plugin.LogSaves.Value)
-                Plugin.Log.LogInfo($"saved (reason={ReasonText(reason)}, logoutPoint={setLogout}, map={(includeMap ? "yes" : "skipped")})");
+                Plugin.Log.LogInfo($"saved (reason={ReasonText(reason)}, logoutPoint={setLogout}, map={(includeMap ? FastMapData.LastPath : "skipped")})");
             if (forceMessage || WantsMessage(reason))
                 Message(setLogout ? "SmartSave: saved" : "SmartSave: saved (position not updated)");
 
             MaybeRequestWorldSave(reason);
         }
 
+        private static bool _mapWritten;
+
+        /// <summary>The save that is running right now was skipped by SkipRepeatSaveSec (for the profiler).</summary>
+        internal static bool SkippedNow;
+        private static float _lastFullSave = -9999f;
+
+        /// <summary>Prefix of Game.SavePlayerProfile, when the save really runs.</summary>
+        internal static void OnProfileSaveStart() => _mapWritten = false;
+
+        /// <summary>Minimap.SaveMapData really ran during this save.</summary>
+        internal static void OnMapWritten() => _mapWritten = true;
+
+        /// <summary>
+        /// A save with the map and the logout point finished within SkipRepeatSaveSec: the game's own regular save
+        /// (server request or timer) would write exactly the same again, so it can be skipped.
+        /// </summary>
+        internal static bool RecentFullSave(out float ago)
+        {
+            ago = Time.realtimeSinceStartup - _lastFullSave;
+            float window = Plugin.SkipRepeatSaveSec.Value;
+            return Plugin.Enabled.Value && window > 0f && ago < window && Player.m_localPlayer != null;
+        }
+
         /// <summary>Postfix of Game.SavePlayerProfile: any profile save (ours, vanilla timer, server push) clears what it covered.</summary>
         internal static void OnProfileSaved(bool setLogoutPoint)
         {
             _lastSaveTime = Time.time;
+            if (setLogoutPoint && _mapWritten) _lastFullSave = Time.realtimeSinceStartup;
             _pending = Reason.None;
             _prio = Prio.None;
             _notBefore = 0f;

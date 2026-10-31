@@ -17,13 +17,14 @@ namespace SmartSave
     {
         public const string Guid = "nfp007.SmartSave";
         public const string Name = "SmartSave";
-        public const string Version = "1.1.0";
+        public const string Version = "1.2.0";
 
         internal static Plugin Instance;
         internal static ManualLogSource Log;
 
         // [General]
         internal static ConfigEntry<bool> Enabled, LogSaves, FastMapSave;
+        internal static ConfigEntry<float> MapPrewarmSec, SkipRepeatSaveSec;
         internal static ConfigEntry<SaveMessageMode> SaveMessage;
         internal static ConfigEntry<float> MinSaveIntervalSec;
         internal static ConfigEntry<KeyboardShortcut> ManualSaveKey;
@@ -61,15 +62,17 @@ namespace SmartSave
                 "  Important = only after crafting, chest changes, the tombstone and a boss / forsaken power.\n" +
                 "  All       = after every SmartSave save.");
             MinSaveIntervalSec = Config.Bind("General", "MinSaveIntervalSec", 15f,
-                "Minimum seconds between two normal saves. Important saves (crafting, chests, tombstone, teleport, manual) ignore it.");
+                "Cooldown: the shortest gap in seconds between two less important saves (arrival, boss, end of combat, skill up,\n" +
+                "new recipe, fallback), so a burst of events gives one save. It never triggers a save by itself.\n" +
+                "Important saves (crafting, chests, tombstone, teleport, manual) ignore it.");
             ManualSaveKey = Config.Bind("General", "ManualSaveKey", new KeyboardShortcut(KeyCode.F6),
                 "Key to save right now. Set to None to turn it off.");
 
             MapSave = Config.Bind("General", "MapSave", MapSaveMode.OnPortal,
                 "When SmartSave's saves also write your explored map. The map is by far the slowest part of a save.\n" +
-                "Measured on a normal PC (with FastMapSave on): a save with the map freezes the game for about 70 ms with a\n" +
-                "local character and 170-310 ms with a Steam Cloud character. Without the map it takes about 20 ms locally\n" +
-                "(about 110-140 ms with Steam Cloud).\n" +
+                "Measured on a normal PC (with FastMapSave on): the map part of a save takes under 1 ms when the map is reused\n" +
+                "and ~50 ms right after exploring. Without FastMapSave it takes ~200 ms. A whole save takes ~20 ms with a local\n" +
+                "character and ~100-300 ms with a Steam Cloud character (the Steam Cloud file handling).\n" +
                 "  OnPortal = only the save right before a teleport writes the map (the screen fades out anyway).\n" +
                 "  Always   = every SmartSave save writes the map: nothing of the map is ever lost, but every save freezes.\n" +
                 "  Never    = SmartSave never writes the map.\n" +
@@ -77,12 +80,23 @@ namespace SmartSave
                 "Without the map, a crash can lose map exploration and new pins since the last save that wrote it. Never items.");
 
             FastMapSave = Config.Bind("General", "FastMapSave", true,
-                "Build the explored map data much faster whenever it is saved (by SmartSave and by the game's own saves).\n" +
-                "Safeguard: the first map save after each game start builds the map data both ways (SmartSave's and the game's)\n" +
-                "and compares them byte by byte. Only if they are identical is the faster version used for the rest of the session.\n" +
-                "If they differ (after a game update, or because another mod changes the map data), SmartSave switches back to\n" +
-                "the game's own method and writes a warning to the log. Because of the check, that first map save takes ~300 ms once.\n" +
+                "Build the explored map data much faster whenever it is saved (by SmartSave and by the game's own saves),\n" +
+                "and reuse it when your explored map and pins haven't changed since the last save (under 1 ms instead of ~50 ms).\n" +
+                "Safeguard: once per game start, when you join a world (usually behind the loading screen), the map data is built\n" +
+                "both ways (SmartSave's and the game's) and compared byte by byte. Only if they are identical is the faster version\n" +
+                "used for the rest of the session. If they differ (after a game update, or because another mod changes the map data),\n" +
+                "SmartSave switches back to the game's own method and writes a warning to the log.\n" +
                 "If another map mod misbehaves (pins or map not saved as expected), set this to false.");
+
+            MapPrewarmSec = Config.Bind("General", "MapPrewarmSec", 60f,
+                "With FastMapSave: every this many seconds, if your explored map or pins changed, SmartSave prepares the map data\n" +
+                "in the background (a ~1-2 ms copy in the game, the rest on another CPU core). The next save that writes the map then\n" +
+                "takes ~1-2 ms for the map instead of ~50 ms. If nothing changed since the last save, the map is reused anyway.\n" +
+                "0 = off (the map is then prepared during the save itself).");
+            SkipRepeatSaveSec = Config.Bind("General", "SkipRepeatSaveSec", 30f,
+                "Skip the game's own regular save (the server's save interval, or the game's 30-minute timer) if a full save\n" +
+                "(with the map and your position) already ran within this many seconds. It would write exactly the same again.\n" +
+                "Saves when quitting, logging out or sleeping are never skipped. 0 = off.");
 
             SaveAfterCrafting = Config.Bind("Triggers", "SaveAfterCrafting", true,
                 "Save after crafting, upgrading or repairing, as soon as the crafting window is closed.");
@@ -138,6 +152,7 @@ namespace SmartSave
             try
             {
                 SaveProfiler.Tick();
+                FastMapData.Tick();
                 SaveScheduler.Tick();
             }
             catch (System.Exception e)

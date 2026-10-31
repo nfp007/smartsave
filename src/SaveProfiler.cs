@@ -138,6 +138,10 @@ namespace SmartSave
             }
             catch { /* only informative */ }
 
+            // how the map was handled: skipped save, map not written, or game / fast / cache
+            if (SaveScheduler.SkippedNow) _source += " (skipped)";
+            else _source += Parts.ContainsKey("mapBuild") ? " map=" + FastMapData.LastPath : " map=none";
+
             var line = new StringBuilder();
             line.Append($"[profile #{_saveNo}] {_source} logoutPoint={_logoutPoint} total={total:F0} ms |");
             foreach (var c in Columns)

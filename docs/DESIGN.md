@@ -1,6 +1,6 @@
 # SmartSave – Design
 
-SmartSave is a client-side BepInEx mod for Valheim. It saves the character at the moments that matter instead of only on a fixed timer, and it never moves the logout point while the player is in danger.
+SmartSave is a client-side BepInEx mod for Valheim. It saves the character at the moments that matter instead of only on a fixed timer, and it never moves the logout point while the player is in danger. It also makes every character save faster: the map data is built in one go and reused when unchanged, and the game's periodic save is skipped right after a full save.
 
 Everything below about vanilla behaviour was read from the IL of `assembly_valheim.dll` (game version from October 2026). Re-check it after big game updates (see `tools/valheim_il.py`).
 
@@ -108,7 +108,7 @@ Trade-off: after a crash, map exploration and pins since the last save that wrot
 
 ### Faster map build (FastMapSave)
 
-`Minimap.GetMapData` is replaced by `FastMapData.Build` (prefix on `GetMapData`), which writes the same data:
+`Minimap.GetMapData` is replaced by `FastMapData.TryGet` (prefix on `GetMapData`), which returns the same data:
 
 - outer `ZPackage`: `int 8` (version), then the compressed inner package,
 - inner: `int m_textureSize`, `m_explored` as one byte (0/1) per bit, `m_exploredOthers` the same (vanilla loops to `m_explored.Length` for both), `int` count of pins with `m_save`, per pin `string m_name`, `Vector3 m_pos`, `int m_type`, `bool m_checked`, `long m_ownerID`, `string m_author.ToString()`, then `bool ZNet.IsReferencePositionPublic()`.
@@ -117,7 +117,15 @@ The difference: the bits are expanded with `BitArray.CopyTo(int[])` into one reu
 
 Measured (0.3.0, Steam Cloud character): `GetMapData` 48–49 ms, of which compression ~39 ms. The bulk build itself is ~10 ms, compared with ~140–230 ms for vanilla's bool-by-bool loop. The first map save per start runs both versions for the check (~290 ms). Whole save with map on Steam Cloud: 170–315 ms (was 290–400). Local with map, estimated from the parts: ~70 ms.
 
-Self-check: until it is verified, the first `GetMapData` call per game start runs both versions. The postfix decompresses both results and compares them byte by byte. Identical → the fast version is used from then on. Different, or any exception → switched off until restart, with a log warning. This catches game updates and mods that change the map data.
+Self-check: once per game start, in a postfix of `Minimap.LoadMapData` (joining a world, usually behind the loading screen), the game's own `GetMapData` runs (our prefix is bypassed) and its decompressed content is compared byte by byte with our payload. Identical → the fast version is used from then on, and the game's result seeds the cache. Different → switched off until restart, with a log warning. If the join check fails for another reason (too early), the first save runs the game's version and checks it instead. This catches game updates and mods that change the map data.
+
+Cache: every `GetMapData` call takes a snapshot (both grids as 32-bit words via `BitArray.CopyTo(int[])`, plus the pins part as written by vanilla), ~1-2 ms. If it equals the snapshot of the cached result exactly (no hashing), the cached bytes are returned. Otherwise the payload is built and compressed (`Utils.Compress`, the game's own) and cached.
+
+Prewarm (`MapPrewarmSec`, default 60 s): if the map changed, the snapshot is taken on the main thread and the payload is built and compressed on a background thread. Only plain arrays cross threads. The disk / Steam Cloud write always stays on the main thread.
+
+Skipping repeated saves (`SkipRepeatSaveSec`, default 30 s): a prefix on `ZNet.RPC_SavePlayerProfile` (server request) and on `Game.SavePlayerProfile` while `Game.UpdateSaving` runs (the game's timer) skips the save if a save with the map **and** the logout point finished within the window. A save without the map never counts, so the game's regular save still keeps the map up to date. Quit, logout and sleep saves are never skipped. The postfix of `SavePlayerProfile` uses `__runOriginal`, so a skipped save doesn't count as a save.
+
+The ideas for the cache, the prewarm, the join check and skipping repeated saves came from the save module of HitchFix (OrdinaryJoe, MIT, github.com/brutaliccus/valheim-performance-fixes). SmartSave's code is its own.
 
 ### Saving must not delay the world save
 
@@ -151,9 +159,11 @@ SmartSave stores `Game.m_saveTimer` before its own `SavePlayerProfile` call and 
 
 ```
 src/
-  Plugin.cs        BepInEx entry point: config, Harmony.PatchAll, Update() → SaveScheduler.Tick()
+  Plugin.cs        BepInEx entry point: config, Harmony.PatchAll, Update() → SaveProfiler / FastMapData / SaveScheduler.Tick()
   SaveScheduler.cs pending reasons, priorities, cooldown, inventory-window debounce, the actual save
   SafetyState.cs   blocked / in combat / logout-safe / typing
+  FastMapData.cs   fast map data build, exact-snapshot cache, background prewarm, self-check on joining
+  SaveProfiler.cs  [Debug] Profiling: timing of every save and its parts (log + CSV)
   Patches.cs       all Harmony patches (one nested class per patch)
 tools/
   valheim_il.py    lists members and disassembles methods of assembly_valheim.dll (hook verification)
@@ -166,4 +176,6 @@ tools/
 - A save causes a short hitch (more with Steam Cloud). That's why there's a cooldown, the window debounce, and no save per item.
 - `Character.OnDeath` only runs on the client that owns the boss. The forsaken power trigger and the fallback cover the rest.
 - Saving before a teleport doesn't prevent a crash during loading. It makes sure nothing is lost if one happens.
-- Ideas: optional admin-only world save after important saves (`RequestWorldSaveAsAdmin`, off by default; it makes every player stutter); save when a portal destination chooser opens (the player stands still in a portal).
+- 1.1.0: the map cache and the join check are confirmed in a game log (map part 0.4-4 ms on reuse). The background prewarm and `SkipRepeatSaveSec` were not yet triggered in a logged session.
+- With Steam Cloud, the remaining cost of a save is the Steam Cloud file handling (`FileHelpers.ReplaceOldFile` 70-210 ms). It stays on the main thread on purpose (Steam Cloud file access is not thread-safe).
+- Ideas: run the save at the end of a teleport / sleep black screen so it isn't seen (HitchFix does this); optional admin-only world save after important saves (`RequestWorldSaveAsAdmin`, off by default; it makes every player stutter); save when a portal destination chooser opens (the player stands still in a portal).

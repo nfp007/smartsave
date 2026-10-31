@@ -13,6 +13,8 @@ Valheim saves your character (inventory, equipment, skills, recipes, map) only e
 
 It never moves your respawn point while you are fighting, falling or swimming, so after a crash you don't reconnect into the fight.
 
+**And it makes saving much faster**, including the game's own autosave. The explored map, the slowest part of every save, is built in one go and reused when nothing changed: under 1 ms instead of ~200 ms. Double saves are skipped. With a local character a save takes about 20 ms, barely noticeable.
+
 Client-side only. The server doesn't need it, and it works on any server and in single player, with local or Steam Cloud characters.
 
 Source code, issues and ideas: **[github.com/nfp007/smartsave](https://github.com/nfp007/smartsave)**
@@ -24,12 +26,12 @@ Source code, issues and ideas: **[github.com/nfp007/smartsave](https://github.co
 | **Crafting, upgrading, repairing** | Saves when you close the crafting window (one save, however many items you made) |
 | **Closing a chest** | Saves if your inventory changed while it was open. Chest to chest gives one save, not ten |
 | **Tombstone** | Saves right after you take everything back |
-| **Before a teleport** | Portals, [Portaler](https://thunderstore.io/c/valheim/p/nfp007/Portaler/), dungeon entrances, any mod that teleports. Loading screens are where games like to crash |
+| **Before a teleport** | Portals, [Portaler](https://thunderstore.io/c/valheim/p/nfp007/Portaler/), dungeon entrances, any mod that teleports. Loading screens are where games like to crash. By default this save also writes the map |
 | **After arriving** | Saves 5 seconds after a teleport |
 | **Boss / forsaken power** | Saves after a boss dies near you or when you take a new power |
 | **Skill level up, new recipe** | Saves at the next calm moment |
 | **After combat** | Anything that waited is saved when the fight is over |
-| **F6** | Save right now |
+| **F6** | Save right now, everything including the map |
 | **Fallback** | If nothing saved for 30 minutes, it saves at the next safe moment |
 
 ## Two kinds of save
@@ -49,18 +51,24 @@ Every character save freezes the game for a moment. That's the game's own save r
 
 Measured on a normal PC (normal frame 10-20 ms):
 
-| Character storage | Save with the game's map save | Save with SmartSave's fast map save | Save without map |
+| Character storage | Save with the game's map save | Save with SmartSave's map save | Save without map |
 |---|---|---|---|
-| **Local** | ~200-280 ms | ~70 ms* | **~20 ms**, barely noticeable |
-| **Steam Cloud** | ~300-400 ms | ~170-310 ms | ~110-140 ms |
+| **Local** | ~200-280 ms | **~20 ms** when the map is reused, ~70 ms* right after exploring | **~20 ms**, barely noticeable |
+| **Steam Cloud** | ~300-400 ms | ~100-300 ms (almost all of it the Steam Cloud file handling) | ~100-140 ms |
 
-\* Calculated from the measured parts (fast map ~50 ms plus the rest of a local save ~20 ms), not measured as a whole.
+With SmartSave the map part of a save takes under 1 ms when the map is reused, and ~50 ms when it has to be built because you just explored.
+
+\* Calculated from the measured parts (map ~50 ms plus the rest of a local save ~20 ms), not measured as a whole.
 
 **Faster map save.** The game builds the map data for a save one point at a time, about 8.5 million steps. SmartSave builds the same data in one go: about 10 ms instead of 140-230 ms, plus ~40-60 ms for compressing it. This makes the game's own saves faster too.
 
-**Safeguard:** the first map save after each game start builds the map data both ways, SmartSave's and the game's, and compares them byte by byte. Only if they are identical does SmartSave use its faster version for the rest of the session. If they differ (after a game update, or because another mod changes the map data), it switches back to the game's own map save and writes a warning to the log. Because of this check, that first map save takes about 300 ms once.
+**Reusing the map.** If your explored map and pins haven't changed since the last save, SmartSave reuses the last map data (under 1 ms). If they have changed, SmartSave prepares the map data in the background every minute (`MapPrewarmSec`), on another CPU core, so the next save can usually reuse it too.
 
-**The map** is still the biggest part of a save. By default (`MapSave = OnPortal`), only the save right before a teleport writes it. The other SmartSave saves keep your items, skills and position safe and leave the stored map as it was. The map is also saved by the game's own saves (server save interval, logout) and by F6. After a crash you can lose map exploration and new pins since the last save that wrote the map. Never items.
+**Safeguard:** once per game start, when you join a world (usually behind the loading screen), SmartSave builds the map data both ways, its own and the game's, and compares them byte by byte. Only if they are identical does it use its faster version for the rest of the session. If they differ (after a game update, or because another mod changes the map data), it switches back to the game's own map save and writes a warning to the log.
+
+**No double saves.** The game's own regular save (the server's save interval, or the game's 30-minute timer) is skipped if a full save, with the map and your position, already ran within the last 30 seconds (`SkipRepeatSaveSec`). Saves when quitting, logging out or sleeping are never skipped.
+
+**The map** is still the biggest part of a save. By default (`MapSave = OnPortal`), only the save right before a teleport writes it. The other SmartSave saves keep your items, skills and position safe and leave the stored map as it was. The map is also saved by the game's own saves (server save interval, logout) and by F6. After a crash you can lose map exploration and new pins since the last save that wrote the map. Never items. Because the map is reused when nothing changed, `MapSave = Always` now costs little: under 1 ms for the map most of the time, ~50 ms right after exploring.
 
 **Local instead of Steam Cloud** makes every save faster still, SmartSave's and the game's own. With Steam Cloud, replacing the character file alone takes about 70-85 ms. With a local character it's about 1-2 ms. You can move a character between Steam Cloud and local storage in Valheim's **Manage saves** menu (main menu, character selection). A local character isn't synced to other PCs and isn't backed up by Steam, so keep your own backups.
 
@@ -73,10 +81,12 @@ All settings are in `BepInEx/config/nfp007.SmartSave.cfg` (also in Configuration
 | General | `Enabled` | true | |
 | General | `LogSaves` | true | One line per save in the BepInEx log, with the reason |
 | General | `SaveMessage` | Off | Small "Saved" message top left: `Off`, `Important` (crafting, chests, tombstone, boss) or `All`. F6 always shows it |
-| General | `MinSaveIntervalSec` | 15 | Minimum gap between normal saves (important saves ignore it) |
+| General | `MinSaveIntervalSec` | 15 | Cooldown between two less important saves (arrival, boss, end of combat, skill up, recipe, fallback). Never triggers a save itself; important saves ignore it |
 | General | `ManualSaveKey` | F6 | `None` = off. Always saves everything, including the map |
-| General | `FastMapSave` | true | Builds the map data much faster, for SmartSave's saves and the game's own. Same result; checked against the game once per start, and switched off by itself if they ever differ |
-| General | `MapSave` | OnPortal | When SmartSave's saves also write the explored map (see below): `OnPortal`, `Always`, `Never` |
+| General | `FastMapSave` | true | Builds the map data much faster and reuses it when nothing changed, for SmartSave's saves and the game's own. Same result; checked against the game once per start, and switched off by itself if they ever differ |
+| General | `MapPrewarmSec` | 60 | Every this many seconds, if the map changed, prepare the map data in the background. 0 = off |
+| General | `SkipRepeatSaveSec` | 30 | Skip the game's own regular save if a full save ran within this many seconds. 0 = off |
+| General | `MapSave` | OnPortal | When SmartSave's saves also write the explored map (see above): `OnPortal`, `Always`, `Never` |
 | Triggers | `SaveAfterCrafting` / `SaveOnChestClose` / `SaveOnTombstone` | true | |
 | Triggers | `GuiCloseDelaySec` | 1.5 | The window must stay closed this long before the save |
 | Triggers | `GuiMaxDelaySec` | 20 | Window open longer than this after a change: save anyway |

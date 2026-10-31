@@ -10,46 +10,97 @@ namespace SmartSave
 
         // ------------------------------------------------------------ bookkeeping of every profile save
 
-        /// <summary>Any character save (ours, the vanilla timer, the server push, logout) resets our state.</summary>
+        /// <summary>
+        /// Every character save (ours, the vanilla timer, the server push, logout) goes through here.
+        /// Prefix: skips the game's own timer save if a full save just happened (SkipRepeatSaveSec).
+        /// Postfix: resets our pending state, only if the save really ran.
+        /// </summary>
         [HarmonyPatch(typeof(Game), nameof(Game.SavePlayerProfile))]
         private static class Game_SavePlayerProfile
         {
-            private static void Postfix(bool setLogoutPoint) => SaveScheduler.OnProfileSaved(setLogoutPoint);
+            private static bool Prefix(Game __instance, bool isFromRpc)
+            {
+                if (!isFromRpc && TimerSave.Running && SaveScheduler.RecentFullSave(out float ago))
+                {
+                    __instance.m_saveTimer = 0f;
+                    SaveScheduler.SkippedNow = true;
+                    if (Plugin.LogSaves.Value)
+                        Plugin.Log.LogInfo($"skipped the game's timer save: a full save ran {ago:F0} s ago");
+                    return false;
+                }
+                SaveScheduler.SkippedNow = false;
+                SaveScheduler.OnProfileSaveStart();
+                return true;
+            }
+
+            private static void Postfix(bool setLogoutPoint, bool __runOriginal)
+            {
+                if (__runOriginal) SaveScheduler.OnProfileSaved(setLogoutPoint);
+            }
+        }
+
+        /// <summary>Marks saves that come from the game's own save timer (Game.UpdateSaving).</summary>
+        [HarmonyPatch(typeof(Game), "UpdateSaving")]
+        private static class TimerSave
+        {
+            internal static bool Running;
+
+            private static void Prefix() => Running = true;
+
+            private static System.Exception Finalizer(System.Exception __exception)
+            {
+                Running = false;
+                return __exception;
+            }
         }
 
         /// <summary>SmartSave's saves may leave the stored map as it is (MapSave setting, see SaveScheduler.IncludeMap).</summary>
         [HarmonyPatch(typeof(Minimap), nameof(Minimap.SaveMapData))]
         private static class Minimap_SaveMapData
         {
-            private static bool Prefix() => !SaveScheduler.SkipMapNow;
+            private static bool Prefix()
+            {
+                if (SaveScheduler.SkipMapNow) return false;
+                SaveScheduler.OnMapWritten();
+                return true;
+            }
         }
 
         /// <summary>
-        /// Faster map data build (FastMapSave). Until the first check against vanilla has passed, vanilla runs too
-        /// and the two results are compared in the postfix.
+        /// Map data from the cache or the fast build (FastMapSave). Until the self-check has passed, the game's own
+        /// GetMapData runs and is compared in the postfix.
         /// </summary>
         [HarmonyPatch(typeof(Minimap), "GetMapData")]
         private static class Minimap_GetMapData
         {
-            private static bool Prefix(Minimap __instance, ref byte[] __result, out byte[] __state)
+            private static bool Prefix(Minimap __instance, ref byte[] __result, out bool __state)
             {
-                __state = null;
+                __state = false;
+                if (FastMapData.Bypass) return true;
+                FastMapData.LastPath = "game";
                 if (!FastMapData.Enabled) return true;
-                var fast = FastMapData.TryBuild(__instance);
-                if (fast == null) return true;
-                if (FastMapData.Verified)
+                if (!FastMapData.Verified)
                 {
-                    __result = fast;
-                    return false;
+                    __state = true; // check against the game's result in the postfix
+                    return true;
                 }
-                __state = fast;
-                return true;
+                var data = FastMapData.TryGet(__instance);
+                if (data == null) return true;
+                __result = data;
+                return false;
             }
 
-            private static void Postfix(byte[] __result, byte[] __state)
+            private static void Postfix(Minimap __instance, byte[] __result, bool __state)
             {
-                if (__state != null) FastMapData.Verify(__state, __result);
+                if (__state) FastMapData.VerifyAtSave(__instance, __result);
             }
+        }
+
+        /// <summary>Joining a world: run the fast map self-check now, usually behind the loading screen.</summary>
+        [HarmonyPatch(typeof(Minimap), "LoadMapData")]
+        private static class Minimap_LoadMapData
+        {
+            private static void Postfix(Minimap __instance) => FastMapData.VerifyAtJoin(__instance);
         }
 
         /// <summary>
@@ -61,7 +112,13 @@ namespace SmartSave
         {
             private static bool Prefix()
             {
-                if (!Plugin.Enabled.Value || !Plugin.SafeServerPushSave.Value) return true;
+                if (!Plugin.Enabled.Value) return true;
+                if (SaveScheduler.RecentFullSave(out float ago))
+                {
+                    if (Plugin.LogSaves.Value) Plugin.Log.LogInfo($"skipped the server's save request: a full save ran {ago:F0} s ago");
+                    return false;
+                }
+                if (!Plugin.SafeServerPushSave.Value) return true;
                 var p = Player.m_localPlayer;
                 if (p == null || Game.instance == null || SafetyState.IsLogoutSafe(p)) return true;
                 if (Plugin.LogSaves.Value) Plugin.Log.LogInfo("server save request while not safe: saving without moving the logout point");

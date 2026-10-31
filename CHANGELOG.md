@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0
+- The map data is reused when your explored map and pins haven't changed: the map part of a save now takes under 1 ms instead of ~50 ms (measured).
+- New `MapPrewarmSec` (60 s): when the map has changed, its data is prepared in the background, so the next save can reuse it.
+- The fast map save's safeguard check now runs when you join a world (usually behind the loading screen), not at the first save.
+- New `SkipRepeatSaveSec` (30 s): the game's own regular save is skipped right after a full SmartSave save (with the map and your position).
+- New icon: an iron-rimmed wooden shield with a glowing save symbol.
+
 ## 1.1.0
 - README: the save time table now compares the game's own map save, SmartSave's fast map save and a save without the map side by side.
 - Corrected the Steam Cloud time with the fast map save: ~170-310 ms (was ~170-270 ms).
