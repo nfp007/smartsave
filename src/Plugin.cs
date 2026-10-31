@@ -17,7 +17,7 @@ namespace SmartSave
     {
         public const string Guid = "nfp007.SmartSave";
         public const string Name = "SmartSave";
-        public const string Version = "1.0.0";
+        public const string Version = "1.1.0";
 
         internal static Plugin Instance;
         internal static ManualLogSource Log;
@@ -68,7 +68,7 @@ namespace SmartSave
             MapSave = Config.Bind("General", "MapSave", MapSaveMode.OnPortal,
                 "When SmartSave's saves also write your explored map. The map is by far the slowest part of a save.\n" +
                 "Measured on a normal PC (with FastMapSave on): a save with the map freezes the game for about 70 ms with a\n" +
-                "local character and 170-270 ms with a Steam Cloud character. Without the map it takes about 20 ms locally\n" +
+                "local character and 170-310 ms with a Steam Cloud character. Without the map it takes about 20 ms locally\n" +
                 "(about 110-140 ms with Steam Cloud).\n" +
                 "  OnPortal = only the save right before a teleport writes the map (the screen fades out anyway).\n" +
                 "  Always   = every SmartSave save writes the map: nothing of the map is ever lost, but every save freezes.\n" +

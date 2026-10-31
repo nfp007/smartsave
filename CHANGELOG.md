@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.0
+- README: the save time table now compares the game's own map save, SmartSave's fast map save and a save without the map side by side.
+- Corrected the Steam Cloud time with the fast map save: ~170-310 ms (was ~170-270 ms).
+
 ## 1.0.0
 - Faster map save (`FastMapSave`, on by default): the explored map data is built in one go instead of one point at a time (~10 ms instead of ~140-230 ms, plus compression). Every save that writes the map gets faster, including the game's own saves. The result is the same as the game's; the first map save after each game start builds it both ways and compares them, and the faster version is switched off with a log warning if they ever differ.
 - `SaveMessage` setting (`Off` by default, `Important` or `All`) replaces `ShowSaveMessage`.

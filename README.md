@@ -47,12 +47,14 @@ Combat is detected from the game's own combat-music state, damage you take, your
 
 Every character save freezes the game for a moment. That's the game's own save routine, the same as its regular autosave. Two things decide how long it takes: whether the explored map is written, and where your character is stored.
 
-Measured on a normal PC (normal frame 10-20 ms), with SmartSave's faster map save:
+Measured on a normal PC (normal frame 10-20 ms):
 
-| Character storage | Save with map | Save without map |
-|---|---|---|
-| **Local** | ~70 ms (without SmartSave: ~200-280 ms) | **~20 ms**, barely noticeable |
-| **Steam Cloud** | ~170-270 ms (without SmartSave: ~300-400 ms) | ~110-140 ms |
+| Character storage | Save with the game's map save | Save with SmartSave's fast map save | Save without map |
+|---|---|---|---|
+| **Local** | ~200-280 ms | ~70 ms* | **~20 ms**, barely noticeable |
+| **Steam Cloud** | ~300-400 ms | ~170-310 ms | ~110-140 ms |
+
+\* Calculated from the measured parts (fast map ~50 ms plus the rest of a local save ~20 ms), not measured as a whole.
 
 **Faster map save.** The game builds the map data for a save one point at a time, about 8.5 million steps. SmartSave builds the same data in one go: about 10 ms instead of 140-230 ms, plus ~40-60 ms for compressing it. This makes the game's own saves faster too.
 
