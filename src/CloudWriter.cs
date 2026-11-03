@@ -29,11 +29,21 @@ namespace SmartSave
     /// and compare  →  delete .fch.new
     /// (vanilla: delete .old, move .fch → .old, move .new → .fch; there .fch is briefly missing, here never).
     ///
+    /// The job starts one frame after the save (Tick), outside the Steam write batch the game opens around every save
+    /// (Splatform's Mount = BeginFileWriteBatch, Unmount = EndFileWriteBatch). Started inside the batch, Steam never
+    /// answered (test 1.2.9).
+    ///
+    /// Every Steam request is tracked: the answer is taken from the CallResult callback or, if that doesn't come, by asking
+    /// Steam directly every frame (SteamUtils.IsAPICallCompleted / GetAPICallResult). Each step is logged (diagnostics).
+    ///
     /// Safety:
-    ///   - one job at a time: a new save first waits for the running job (normally already done, saves are seconds apart)
+    ///   - one job at a time: a new save first waits for the running job (normally already done, saves are seconds apart);
+    ///     a job that hasn't started yet is dropped, because the new save contains newer data anyway
     ///   - saves while the game shuts down / logs out are never taken over and wait for the running job first
     ///   - ZNet.ConsiderAutoBackup of the save is run after the job, so it never sees the old file
-    ///   - any Steam error: the data is written as a local backup, like vanilla does, and the feature is off until restart
+    ///   - any Steam error or no answer in time (1 s, 3 s when quitting): the data is written as a local backup like vanilla
+    ///     does, the feature is off until restart, and the game saves again (if a late Steam answer shows that an old write
+    ///     finished after that, the game saves once more, so the newest data is always written last)
     /// </summary>
     internal static class CloudWriter
     {
@@ -47,7 +57,10 @@ namespace SmartSave
             public long Last;
         }
 
+        private enum CallKind { None, Write, Read }
+
         private static bool _disabled;
+        private static Job _pending;        // handed over by a save, starts on the next frame
         private static Job _job;            // running job (async steps in flight)
         private static string _capturedPath; // .fch.new path captured during the current save
         private static byte[] _captured;
@@ -59,6 +72,19 @@ namespace SmartSave
         private static Action<byte[]> _onRead;
         private static byte[] _readBuffer;
 
+        // the one Steam request in flight
+        private static SteamAPICall_t _call = SteamAPICall_t.Invalid;
+        private static CallKind _kind;
+        private static string _callWhat;
+        private static readonly Stopwatch CallSw = new Stopwatch();
+        private static int _callFrames;
+        private static int _completedSeenFrames;
+
+        // a request that was given up (timeout): if it still finishes, the game must save once more afterwards
+        private static SteamAPICall_t _abandoned = SteamAPICall_t.Invalid;
+
+        private const int WaitMs = 1000, WaitShutdownMs = 3000;
+
         private static readonly MethodInfo ConsiderAutoBackup = AccessTools.Method(typeof(ZNet), "ConsiderAutoBackup");
         private static readonly MethodInfo Mount = AccessTools.Method(typeof(FileHelpers), "Mount");
         private static readonly MethodInfo Unmount = AccessTools.Method(typeof(FileHelpers), "Unmount");
@@ -69,7 +95,7 @@ namespace SmartSave
         /// <summary>True while a deferred auto-backup check runs (our prefix must let it through).</summary>
         internal static bool Bypass { get; private set; }
 
-        internal static bool Busy => _job != null;
+        internal static bool Busy => _job != null || _pending != null;
 
         /// <summary>Milliseconds the current save had to wait for the previous background job (for the log).</summary>
         internal static double LastWaitMs { get; private set; }
@@ -79,7 +105,13 @@ namespace SmartSave
         internal static void OnSaveStart(PlayerProfile profile)
         {
             LastWaitMs = 0;
-            Wait("a new save");
+            if (_pending != null)
+            {
+                Log("a newer save came before the background write started; the newer one replaces it");
+                _pending = null;
+            }
+            var game = Game.instance;
+            Wait("a new save", game != null && game.IsShuttingDown() ? WaitShutdownMs : WaitMs);
             _capturedPath = null;
             _captured = null;
             _queuedThisSave = null;
@@ -124,21 +156,9 @@ namespace SmartSave
             if (!Active || _captured == null || !string.Equals(newFile, _capturedPath, StringComparison.Ordinal)) return false;
             var job = new Job { Fch = saveFile, New = newFile, Old = oldFile, Data = _captured };
             _captured = null;
-            try
-            {
-                Start(job);
-                _queuedThisSave = job;
-                return true;
-            }
-            catch (Exception e)
-            {
-                // nothing written yet: hand the save back to the game in this same frame
-                Disable($"could not start ({e.GetType().Name}: {e.Message})");
-                _job = null;
-                _captured = job.Data;
-                WriteSync(job.New, job.Data);
-                return false; // vanilla ReplaceOldFile runs now with the .new we just wrote
-            }
+            _pending = job;          // starts on the next frame, after the game has closed its Steam write batch
+            _queuedThisSave = job;
+            return true;
         }
 
         /// <summary>Prefix of ZNet.ConsiderAutoBackup during a taken-over save: run it after the job instead.</summary>
@@ -157,10 +177,29 @@ namespace SmartSave
             if (_readResult == null) _readResult = CallResult<RemoteStorageFileReadAsyncComplete_t>.Create(OnReadComplete);
         }
 
+        /// <summary>Every frame (Plugin.Update): start a handed-over job, ask Steam about the request in flight.</summary>
+        internal static void Tick()
+        {
+            if (_pending != null && _job == null && !Active)
+            {
+                var job = _pending;
+                _pending = null;
+                try { Start(job); }
+                catch (Exception e)
+                {
+                    _job = job;
+                    Fail($"starting ({e.GetType().Name}: {e.Message})");
+                }
+            }
+            if (_kind != CallKind.None) Poll();
+            CheckAbandoned();
+        }
+
         private static void Start(Job job)
         {
             EnsureCallResults();
             _job = job;
+            Log($"background cloud write started ({job.Data.Length / 1024} KB, {job.Sw.Elapsed.TotalMilliseconds:F0} ms after the save)");
             job.Last = job.Sw.ElapsedTicks;
             WriteAsync(job.New, job.Data, ok =>
             {
@@ -212,12 +251,17 @@ namespace SmartSave
             _readBuffer = new byte[size];
             _onRead = then;
             var call = SteamRemoteStorage.FileReadAsync(path, 0, (uint)size);
-            if (call == SteamAPICall_t.Invalid) { _onRead = null; _readBuffer = null; then(null); return; }
+            if (call == SteamAPICall_t.Invalid) { _onRead = null; _readBuffer = null; Log("→ read " + path + ": Steam refused the request"); then(null); return; }
+            Track(call, CallKind.Read, "read " + path);
             _readResult.Set(call);
         }
 
-        private static void OnReadComplete(RemoteStorageFileReadAsyncComplete_t r, bool ioFailure)
+        private static void OnReadComplete(RemoteStorageFileReadAsyncComplete_t r, bool ioFailure) => ReadDone(r, ioFailure, "callback");
+
+        private static void ReadDone(RemoteStorageFileReadAsyncComplete_t r, bool ioFailure, string via)
         {
+            if (_kind != CallKind.Read) return;
+            Answered(via, r.m_eResult, ioFailure);
             var then = _onRead;
             var buf = _readBuffer;
             _onRead = null;
@@ -237,15 +281,97 @@ namespace SmartSave
         {
             _onWrite = then;
             var call = SteamRemoteStorage.FileWriteAsync(path, data, (uint)data.Length);
-            if (call == SteamAPICall_t.Invalid) { _onWrite = null; then(false); return; }
+            if (call == SteamAPICall_t.Invalid) { _onWrite = null; Log("→ write " + path + ": Steam refused the request"); then(false); return; }
+            Track(call, CallKind.Write, $"write {path} ({data.Length / 1024} KB)");
             _writeResult.Set(call);
         }
 
-        private static void OnWriteComplete(RemoteStorageFileWriteAsyncComplete_t r, bool ioFailure)
+        private static void OnWriteComplete(RemoteStorageFileWriteAsyncComplete_t r, bool ioFailure) => WriteDone(r, ioFailure, "callback");
+
+        private static void WriteDone(RemoteStorageFileWriteAsyncComplete_t r, bool ioFailure, string via)
         {
+            if (_kind != CallKind.Write) return;
+            Answered(via, r.m_eResult, ioFailure);
             var then = _onWrite;
             _onWrite = null;
             then?.Invoke(!ioFailure && r.m_eResult == EResult.k_EResultOK);
+        }
+
+        private static void Track(SteamAPICall_t call, CallKind kind, string what)
+        {
+            _call = call;
+            _kind = kind;
+            _callWhat = what;
+            _callFrames = 0;
+            _completedSeenFrames = 0;
+            CallSw.Restart();
+            Log($"→ {what} (request {call.m_SteamAPICall})");
+        }
+
+        private static void Answered(string via, EResult result, bool ioFailure)
+        {
+            Log($"← {_callWhat}: {result}{(ioFailure ? ", I/O failure" : "")} after {CallSw.Elapsed.TotalMilliseconds:F0} ms, {_callFrames} frames, via {via}");
+            _kind = CallKind.None;
+            _call = SteamAPICall_t.Invalid;
+        }
+
+        /// <summary>
+        /// Ask Steam directly about the request in flight. If Steam says it is finished but the callback hasn't
+        /// delivered the answer within 2 frames, fetch the result ourselves.
+        /// </summary>
+        private static void Poll()
+        {
+            _callFrames++;
+            bool failed;
+            if (!SteamUtils.IsAPICallCompleted(_call, out failed)) return;
+            if (++_completedSeenFrames < 3) return;
+            Log($"Steam reports {_callWhat} as finished, but the callback did not deliver it; asking Steam for the result");
+            if (_kind == CallKind.Write)
+            {
+                _writeResult.Cancel();
+                if (TryGetResult(_call, out RemoteStorageFileWriteAsyncComplete_t w, out failed)) WriteDone(w, failed, "asking Steam");
+                else { Log("Steam gave no result for " + _callWhat); _kind = CallKind.None; Fail("getting the result of " + _callWhat); }
+            }
+            else
+            {
+                _readResult.Cancel();
+                if (TryGetResult(_call, out RemoteStorageFileReadAsyncComplete_t r, out failed)) ReadDone(r, failed, "asking Steam");
+                else { Log("Steam gave no result for " + _callWhat); _kind = CallKind.None; Fail("getting the result of " + _callWhat); }
+            }
+        }
+
+        private static bool TryGetResult<T>(SteamAPICall_t call, out T result, out bool failed) where T : struct
+        {
+            result = default;
+            failed = true;
+            int size = System.Runtime.InteropServices.Marshal.SizeOf(typeof(T));
+            var id = (int)typeof(T).GetField("k_iCallback").GetRawConstantValue();
+            IntPtr p = System.Runtime.InteropServices.Marshal.AllocHGlobal(size);
+            try
+            {
+                if (!SteamUtils.GetAPICallResult(call, p, size, id, out failed)) return false;
+                result = (T)System.Runtime.InteropServices.Marshal.PtrToStructure(p, typeof(T));
+                return true;
+            }
+            finally
+            {
+                System.Runtime.InteropServices.Marshal.FreeHGlobal(p);
+            }
+        }
+
+        /// <summary>A given-up request finished after all: let the game write the newest data once more, so it is written last.</summary>
+        private static void CheckAbandoned()
+        {
+            if (_abandoned == SteamAPICall_t.Invalid) return;
+            if (!SteamUtils.IsAPICallCompleted(_abandoned, out _)) return;
+            _abandoned = SteamAPICall_t.Invalid;
+            Log("a given-up background write finished late; the game saves once more so the newest data is written last");
+            SaveScheduler.Request(Reason.Repair, Prio.High, false);
+        }
+
+        private static void Log(string text)
+        {
+            if (Plugin.LogSaves.Value) Plugin.Log.LogInfo("cloud: " + text);
         }
 
         private static void Done(Job job)
@@ -261,6 +387,10 @@ namespace SmartSave
         private static void Fail(string what)
         {
             var job = _job;
+            if (_kind != CallKind.None && _call != SteamAPICall_t.Invalid) _abandoned = _call;
+            _kind = CallKind.None;
+            _call = SteamAPICall_t.Invalid;
+            try { _writeResult?.Cancel(); _readResult?.Cancel(); } catch { /* nothing registered */ }
             _job = null;
             _onWrite = null;
             _onRead = null;
@@ -282,6 +412,10 @@ namespace SmartSave
             {
                 Plugin.Log.LogError($"background cloud write: could not write the local backup either: {e.Message}");
             }
+            // the cloud file may not have the newest data: the game's own save (now in use) writes it again
+            var game = Game.instance;
+            if (game != null && !game.IsShuttingDown() && Player.m_localPlayer != null)
+                SaveScheduler.Request(Reason.Repair, Prio.High, false);
         }
 
         private static void RunDeferredBackup(Job job)
@@ -308,24 +442,24 @@ namespace SmartSave
 
         // ------------------------------------------------------------ waiting (new save, shutdown)
 
-        /// <summary>Block until the running job is finished: pumps Steam's callbacks. Normally returns at once.</summary>
-        internal static void Wait(string why)
+        /// <summary>Block until the running job is finished: pumps Steam's callbacks and asks Steam. Normally returns at once.</summary>
+        internal static void Wait(string why, int timeoutMs)
         {
             if (_job == null) return;
             var sw = Stopwatch.StartNew();
-            while (_job != null && sw.ElapsedMilliseconds < 5000)
+            while (_job != null && sw.ElapsedMilliseconds < timeoutMs)
             {
                 SteamAPI.RunCallbacks();
+                if (_job != null && _kind != CallKind.None) Poll();
                 if (_job != null) System.Threading.Thread.Sleep(1);
             }
             LastWaitMs = sw.Elapsed.TotalMilliseconds;
             if (_job != null)
             {
-                Fail("waiting for the previous write (no answer from Steam in 5 s)");
+                Fail($"waiting for the previous write (no answer from Steam in {timeoutMs / 1000.0:F0} s, stuck at: {_callWhat ?? "?"})");
                 return;
             }
-            if (Plugin.LogSaves.Value)
-                Plugin.Log.LogInfo($"background cloud write: {why} waited {LastWaitMs:F0} ms for the previous write");
+            Log($"{why} waited {LastWaitMs:F0} ms for the previous background write");
         }
 
         // ------------------------------------------------------------ helpers

@@ -18,6 +18,7 @@ namespace SmartSave
         CombatEnd = 1 << 8,
         Fallback = 1 << 9,
         Manual = 1 << 10,
+        Repair = 1 << 11,     // the background cloud write failed: let the game write the newest data again
     }
 
     /// <summary>When SmartSave's saves also write the explored map (the slow part of a save).</summary>

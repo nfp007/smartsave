@@ -17,7 +17,7 @@ namespace SmartSave
     {
         public const string Guid = "nfp007.SmartSave";
         public const string Name = "SmartSave";
-        public const string Version = "1.2.9";
+        public const string Version = "1.2.10";
 
         internal static Plugin Instance;
         internal static ManualLogSource Log;
@@ -161,6 +161,7 @@ namespace SmartSave
             {
                 SaveProfiler.Tick();
                 FastMapData.Tick();
+                CloudWriter.Tick();
                 SaveScheduler.Tick();
             }
             catch (System.Exception e)
