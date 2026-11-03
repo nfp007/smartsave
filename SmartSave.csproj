@@ -12,7 +12,7 @@
     <RootNamespace>SmartSave</RootNamespace>
     <LangVersion>9.0</LangVersion>
     <Nullable>disable</Nullable>
-    <Version>1.2.0</Version>
+    <Version>1.2.9</Version>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AutomaticallyUseReferenceAssemblyPackages>false</AutomaticallyUseReferenceAssemblyPackages>
@@ -38,6 +38,7 @@
     <Reference Include="assembly_valheim"><HintPath>$(GameLib)assembly_valheim.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="assembly_utils"><HintPath>$(GameLib)assembly_utils.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Splatform"><HintPath>$(GameLib)Splatform.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="com.rlabrecque.steamworks.net"><HintPath>$(GameLib)com.rlabrecque.steamworks.net.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine"><HintPath>$(GameLib)UnityEngine.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.CoreModule"><HintPath>$(GameLib)UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.PhysicsModule"><HintPath>$(GameLib)UnityEngine.PhysicsModule.dll</HintPath><Private>false</Private></Reference>

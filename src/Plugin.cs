@@ -17,7 +17,7 @@ namespace SmartSave
     {
         public const string Guid = "nfp007.SmartSave";
         public const string Name = "SmartSave";
-        public const string Version = "1.2.0";
+        public const string Version = "1.2.9";
 
         internal static Plugin Instance;
         internal static ManualLogSource Log;
@@ -25,6 +25,7 @@ namespace SmartSave
         // [General]
         internal static ConfigEntry<bool> Enabled, LogSaves, FastMapSave;
         internal static ConfigEntry<float> MapPrewarmSec, SkipRepeatSaveSec;
+        internal static ConfigEntry<BackgroundWriteMode> BackgroundWrite;
         internal static ConfigEntry<SaveMessageMode> SaveMessage;
         internal static ConfigEntry<float> MinSaveIntervalSec;
         internal static ConfigEntry<KeyboardShortcut> ManualSaveKey;
@@ -93,6 +94,13 @@ namespace SmartSave
                 "in the background (a ~1-2 ms copy in the game, the rest on another CPU core). The next save that writes the map then\n" +
                 "takes ~1-2 ms for the map instead of ~50 ms. If nothing changed since the last save, the map is reused anyway.\n" +
                 "0 = off (the map is then prepared during the save itself).");
+            BackgroundWrite = Config.Bind("General", "BackgroundWrite", BackgroundWriteMode.CloudOnly,
+                "Steam Cloud characters: the save is made in the frame as always (all data captured at once), but writing it to\n" +
+                "Steam Cloud happens in the background through Steam's own background write. A Steam Cloud save then freezes the\n" +
+                "game much shorter. The game's safe order is kept (.new, .old, .fch). Quitting and logging out always wait for it.\n" +
+                "If Steam reports an error, the save is kept as a local backup (like the game does) and this switches itself off.\n" +
+                "  CloudOnly = Steam Cloud characters only (local characters already save fast).\n" +
+                "  Off       = the game's own cloud save.");
             SkipRepeatSaveSec = Config.Bind("General", "SkipRepeatSaveSec", 30f,
                 "Skip the game's own regular save (the server's save interval, or the game's 30-minute timer) if a full save\n" +
                 "(with the map and your position) already ran within this many seconds. It would write exactly the same again.\n" +
@@ -136,7 +144,7 @@ namespace SmartSave
                 "This makes the game stutter for everybody. Keep it off unless your server crashes too.");
             WorldSaveMinIntervalMin = Config.Bind("Server", "WorldSaveMinIntervalMin", 5f, "Minimum minutes between two world save requests.");
 
-            Profiling = Config.Bind("Debug", "Profiling", false,
+            Profiling = Config.Bind("Debug", "Profiling", true,
                 "Measure every character save (SmartSave's and the game's own) and write the results to the BepInEx log\n" +
                 "and to BepInEx/SmartSave_profile.csv: total time, the slow parts (map, compression, file write, Steam Cloud),\n" +
                 "memory and the frame times right after the save. Needs a game restart to change.");

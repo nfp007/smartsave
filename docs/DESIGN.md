@@ -127,6 +127,21 @@ Skipping repeated saves (`SkipRepeatSaveSec`, default 30 s): a prefix on `ZNet.R
 
 The ideas for the cache, the prewarm, the join check and skipping repeated saves came from the save module of HitchFix (OrdinaryJoe, MIT, github.com/brutaliccus/valheim-performance-fixes). SmartSave's code is its own.
 
+### Background Steam Cloud write (BackgroundWrite)
+
+A Steam Cloud character save spends most of its time in `FileHelpers.ReplaceOldFile`: Splatform's `SteamCloud.MoveFile` is `CopyFile` + `DeleteFile` (Steam Cloud has no rename), so `.fch → .old` and `.new → .fch` each read and write the whole file. `SteamCloud.WriteFile` also allocates a 100 MB chunk buffer per write (~200 MB of garbage per save, measured).
+
+`CloudWriter` (only when the profile is in Steam Cloud, the game is not shutting down and Steam is initialized):
+- `PlayerProfile.SavePlayerToDisk` prefix: wait for a running job (pumping `SteamAPI.RunCallbacks`), decide whether this save is taken over.
+- `FileHelpers.CloudFileWriteInChunks` prefix for `*.fch.new`: keep the finished bytes, report success.
+- `FileHelpers.ReplaceOldFile` prefix: start the job instead of the three copies.
+- `ZNet.ConsiderAutoBackup` prefix: deferred until the job is done (it would read the old file).
+- Job, each step after the previous one's Steam callback: `FileWriteAsync(.new)` → `FileReadAsync(.fch)` + `FileWriteAsync(.old)` → `FileWriteAsync(.fch)` → `FileReadAsync(.fch)` and byte compare → `FileDelete(.new)` → `SaveSystem.InvalidateCache`, deferred auto-backup check.
+- Steam does the disk work; callbacks arrive on the main thread via `SteamAPI.RunCallbacks` (called every frame by the game's `SteamManager`). No own thread. Data arrays stay referenced until confirmed (Unity's GC does not move objects).
+- Shutdown / logout: `Game.Shutdown` sets `m_shuttingDown` before its final `SavePlayerProfile`, so that save is never taken over and waits for the running job first.
+- Any Steam error or no answer in 5 s: the data is written as a local `_backup_cloud-<date>.fch` (as vanilla does on a failed cloud save), the feature is off until restart.
+- Open (to measure): whether `FileWriteAsync` keeps the frame free on real hardware, and behaviour when the game is killed during a job.
+
 ### Saving must not delay the world save
 
 SmartSave stores `Game.m_saveTimer` before its own `SavePlayerProfile` call and restores it afterwards. This keeps the host's world save on schedule. The server-push path keeps the vanilla behaviour.

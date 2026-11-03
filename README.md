@@ -70,6 +70,8 @@ With SmartSave the map part of a save takes under 1 ms when the map is reused, a
 
 **The map** is still the biggest part of a save. By default (`MapSave = OnPortal`), only the save right before a teleport writes it. The other SmartSave saves keep your items, skills and position safe and leave the stored map as it was. The map is also saved by the game's own saves (server save interval, logout) and by F6. After a crash you can lose map exploration and new pins since the last save that wrote the map. Never items. Because the map is reused when nothing changed, `MapSave = Always` now costs little: under 1 ms for the map most of the time, ~50 ms right after exploring.
 
+**Steam Cloud in the background** (`BackgroundWrite`). Steam Cloud has no "rename", so the game copies the whole character file three times on every save, all inside the freeze. With SmartSave the save is still made at once (all data captured in that frame), but writing it to Steam Cloud happens in the background through Steam's own background write. The game's safe order is kept: first `.new`, then the previous file as `.old`, then the new `.fch`, which is read back and compared before `.new` is removed. Quitting and logging out wait for it. If Steam reports any error, the save is kept as a local backup (like the game does) and SmartSave switches back to the game's own cloud save.
+
 **Local instead of Steam Cloud** makes every save faster still, SmartSave's and the game's own. With Steam Cloud, replacing the character file alone takes about 70-85 ms. With a local character it's about 1-2 ms. You can move a character between Steam Cloud and local storage in Valheim's **Manage saves** menu (main menu, character selection). A local character isn't synced to other PCs and isn't backed up by Steam, so keep your own backups.
 
 ## Settings
@@ -86,6 +88,7 @@ All settings are in `BepInEx/config/nfp007.SmartSave.cfg` (also in Configuration
 | General | `FastMapSave` | true | Builds the map data much faster and reuses it when nothing changed, for SmartSave's saves and the game's own. Same result; checked against the game once per start, and switched off by itself if they ever differ |
 | General | `MapPrewarmSec` | 60 | Every this many seconds, if the map changed, prepare the map data in the background. 0 = off |
 | General | `SkipRepeatSaveSec` | 30 | Skip the game's own regular save if a full save ran within this many seconds. 0 = off |
+| General | `BackgroundWrite` | CloudOnly | Steam Cloud characters: the save is made in the frame, the Steam Cloud file work happens in the background. `Off` = the game's own cloud save |
 | General | `MapSave` | OnPortal | When SmartSave's saves also write the explored map (see above): `OnPortal`, `Always`, `Never` |
 | Triggers | `SaveAfterCrafting` / `SaveOnChestClose` / `SaveOnTombstone` | true | |
 | Triggers | `GuiCloseDelaySec` | 1.5 | The window must stay closed this long before the save |

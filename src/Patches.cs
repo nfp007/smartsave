@@ -39,6 +39,53 @@ namespace SmartSave
             }
         }
 
+        // ------------------------------------------------------------ background Steam Cloud write (BackgroundWrite)
+
+        /// <summary>Start / end of writing the character file: decides whether the Steam Cloud file work is taken over.</summary>
+        [HarmonyPatch(typeof(PlayerProfile), "SavePlayerToDisk")]
+        private static class PlayerProfile_SavePlayerToDisk
+        {
+            private static void Prefix(PlayerProfile __instance) => CloudWriter.OnSaveStart(__instance);
+
+            private static System.Exception Finalizer(System.Exception __exception)
+            {
+                CloudWriter.OnSaveEnd();
+                return __exception;
+            }
+        }
+
+        /// <summary>Writing .fch.new to Steam Cloud: keep the finished bytes instead (written in the background).</summary>
+        [HarmonyPatch(typeof(FileHelpers), nameof(FileHelpers.CloudFileWriteInChunks))]
+        private static class FileHelpers_CloudFileWriteInChunks
+        {
+            private static bool Prefix(string pchFile, byte[] data, ref bool __result)
+            {
+                if (!CloudWriter.TryCapture(pchFile, data)) return true;
+                __result = true;
+                return false;
+            }
+        }
+
+        /// <summary>The three Steam Cloud "moves" (each a full copy): done in the background instead.</summary>
+        [HarmonyPatch(typeof(FileHelpers), nameof(FileHelpers.ReplaceOldFile))]
+        private static class FileHelpers_ReplaceOldFile
+        {
+            private static bool Prefix(string saveFile, string newFile, string oldFile) =>
+                !CloudWriter.TryReplace(saveFile, newFile, oldFile);
+        }
+
+        /// <summary>The auto-backup check right after the save would read the old file: run it after the background write.</summary>
+        [HarmonyPatch(typeof(ZNet), nameof(ZNet.ConsiderAutoBackup))]
+        private static class ZNet_ConsiderAutoBackup
+        {
+            private static bool Prefix(object[] __args, ref bool __result)
+            {
+                if (!CloudWriter.TryDeferBackup(__args)) return true;
+                __result = true;
+                return false;
+            }
+        }
+
         /// <summary>Marks saves that come from the game's own save timer (Game.UpdateSaving).</summary>
         [HarmonyPatch(typeof(Game), "UpdateSaving")]
         private static class TimerSave
