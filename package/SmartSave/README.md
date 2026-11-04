@@ -13,7 +13,7 @@ Valheim saves your character (inventory, equipment, skills, recipes, map) only e
 
 It never moves your respawn point while you are fighting, falling or swimming, so after a crash you don't reconnect into the fight.
 
-**And it makes saving much faster**, including the game's own autosave. The explored map, the slowest part of every save, is built in one go and reused when nothing changed: under 1 ms instead of ~200 ms. Double saves are skipped. With a local character a save takes about 20 ms, barely noticeable.
+**And it makes saving much faster**, including the game's own autosave. The explored map, the slowest part of every save, is built in one go and reused when nothing changed: under 1 ms instead of ~200 ms. Steam Cloud characters are written in the background. Double saves are skipped. A save now freezes the game for about 20 ms, with local and Steam Cloud characters alike: barely noticeable.
 
 Client-side only. The server doesn't need it, and it works on any server and in single player, with local or Steam Cloud characters.
 
@@ -49,14 +49,14 @@ Combat is detected from the game's own combat-music state, damage you take, your
 
 Every character save freezes the game for a moment. That's the game's own save routine, the same as its regular autosave. Two things decide how long it takes: whether the explored map is written, and where your character is stored.
 
-Measured on a normal PC (normal frame 10-20 ms):
+Measured on a normal PC (normal frame 20-30 ms), how long one save freezes the game:
 
-| Character storage | Save with the game's map save | Save with SmartSave's map save | Save without map |
-|---|---|---|---|
-| **Local** | ~200-280 ms | **~20 ms** when the map is reused, ~70 ms* right after exploring | **~20 ms**, barely noticeable |
-| **Steam Cloud** | ~300-400 ms | ~100-300 ms (almost all of it the Steam Cloud file handling) | ~100-140 ms |
+| Character storage | Without SmartSave | With SmartSave, map reused | With SmartSave, right after exploring | With SmartSave, save without map |
+|---|---|---|---|---|
+| **Local** | ~200-280 ms | **~20 ms** | ~70 ms* | **~20 ms** |
+| **Steam Cloud** | ~300-400 ms | **~17-21 ms** | ~72-88 ms | **~17 ms** |
 
-With SmartSave the map part of a save takes under 1 ms when the map is reused, and ~50 ms when it has to be built because you just explored.
+With SmartSave the map part of a save takes under 1 ms when the map is reused, and ~50 ms when it has to be built because you just explored. With Steam Cloud, the remaining ~13 ms is the game's own check before every cloud save; writing the file happens in the background (~90-150 ms, without freezing the game).
 
 \* Calculated from the measured parts (map ~50 ms plus the rest of a local save ~20 ms), not measured as a whole.
 
@@ -70,7 +70,9 @@ With SmartSave the map part of a save takes under 1 ms when the map is reused, a
 
 **The map** is still the biggest part of a save. By default (`MapSave = OnPortal`), only the save right before a teleport writes it. The other SmartSave saves keep your items, skills and position safe and leave the stored map as it was. The map is also saved by the game's own saves (server save interval, logout) and by F6. After a crash you can lose map exploration and new pins since the last save that wrote the map. Never items. Because the map is reused when nothing changed, `MapSave = Always` now costs little: under 1 ms for the map most of the time, ~50 ms right after exploring.
 
-**Local instead of Steam Cloud** makes every save faster still, SmartSave's and the game's own. With Steam Cloud, replacing the character file alone takes about 70-85 ms. With a local character it's about 1-2 ms. You can move a character between Steam Cloud and local storage in Valheim's **Manage saves** menu (main menu, character selection). A local character isn't synced to other PCs and isn't backed up by Steam, so keep your own backups.
+**Steam Cloud in the background** (`BackgroundWrite`). Steam Cloud has no "rename", so the game copies the whole character file three times on every save, all inside the freeze (~100-300 ms). With SmartSave the save is still made at once (all data captured in that frame), but writing it to Steam Cloud happens in the background through Steam's own background write (~90-150 ms, the game keeps running). The game's safe order is kept: first `.new`, then the previous file as `.old`, then the new `.fch`, which is read back and compared before `.new` is removed. A new save always waits until the previous one is fully written. Quitting and logging out wait for it too. If Steam reports any error, the save is kept as a local backup (like the game does), the game's own save writes the newest data again, and SmartSave switches back to the game's own cloud save until the next start.
+
+**Local or Steam Cloud?** With SmartSave both save about equally fast. Without SmartSave, a local character saves much faster than a Steam Cloud one. You can move a character between Steam Cloud and local storage in Valheim's **Manage saves** menu (main menu, character selection). A local character isn't synced to other PCs and isn't backed up by Steam, so keep your own backups.
 
 ## Settings
 
@@ -86,6 +88,7 @@ All settings are in `BepInEx/config/nfp007.SmartSave.cfg` (also in Configuration
 | General | `FastMapSave` | true | Builds the map data much faster and reuses it when nothing changed, for SmartSave's saves and the game's own. Same result; checked against the game once per start, and switched off by itself if they ever differ |
 | General | `MapPrewarmSec` | 60 | Every this many seconds, if the map changed, prepare the map data in the background. 0 = off |
 | General | `SkipRepeatSaveSec` | 30 | Skip the game's own regular save if a full save ran within this many seconds. 0 = off |
+| General | `BackgroundWrite` | CloudOnly | Steam Cloud characters: the save is made in the frame, the Steam Cloud file work happens in the background. `Off` = the game's own cloud save |
 | General | `MapSave` | OnPortal | When SmartSave's saves also write the explored map (see above): `OnPortal`, `Always`, `Never` |
 | Triggers | `SaveAfterCrafting` / `SaveOnChestClose` / `SaveOnTombstone` | true | |
 | Triggers | `GuiCloseDelaySec` | 1.5 | The window must stay closed this long before the save |

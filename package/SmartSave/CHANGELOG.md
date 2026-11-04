@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.0
+- New `BackgroundWrite` (`CloudOnly`, on by default): for Steam Cloud characters the save is still made in the frame, but writing it to Steam Cloud happens in the background through Steam's own background write. A Steam Cloud save now freezes the game for ~17-21 ms instead of ~100-300 ms (measured; ~72-88 ms right after exploring).
+- The game's safe order is kept (.new, .old, .fch), every save is read back and compared, a new save waits until the previous one is fully written, and quitting and logging out wait for it.
+- On any Steam error the save is kept as a local backup, the game's own save writes the newest data again, and the feature switches itself off until the next start.
+
 ## 1.2.0
 - The map data is reused when your explored map and pins haven't changed: the map part of a save now takes under 1 ms instead of ~50 ms (measured).
 - New `MapPrewarmSec` (60 s): when the map has changed, its data is prepared in the background, so the next save can reuse it.

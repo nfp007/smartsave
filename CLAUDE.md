@@ -30,6 +30,7 @@ src/Plugin.cs        entry point: all config entries (Config.Bind), Harmony.Patc
 src/SaveScheduler.cs pending save reasons (flags), priorities, cooldown, inventory-window debounce, SaveNow()
 src/SafetyState.cs   IsBlocked / InCombat / IsLogoutSafe / IsTyping
 src/FastMapData.cs   fast GetMapData build, exact-snapshot map cache, background prewarm, self-check on joining
+src/CloudWriter.cs   BackgroundWrite: Steam Cloud character file written via Steam's async API (FileWriteAsync), read back and checked
 src/SaveProfiler.cs  [Debug] Profiling: times every save and its parts → BepInEx log + BepInEx/SmartSave_profile.csv
 src/Patches.cs       every Harmony patch, one nested private static class per patch
 tools/valheim_il.py  list members / disassemble methods of assembly_valheim.dll
@@ -43,6 +44,7 @@ tools/valheim_il.py  list members / disassemble methods of assembly_valheim.dll
 - The explored map is the slow part of a save (~85-90%). SmartSave's saves include it only as `MapSave` says (`SaveScheduler.IncludeMap`). The manual key always includes it. Never skip it in vanilla saves.
 - `FastMapData` must produce exactly what `Minimap.GetMapData` produces. After a game update, compare with `tools/valheim_il.py il <dll> Minimap::GetMapData`. The runtime self-check switches it off on any difference, but then the speed-up is gone.
 - The map cache is keyed by an exact snapshot (both grids + pins part), never by a hash. Only plain arrays may go to the prewarm thread; no game objects off the main thread, and the file write always stays on the main thread.
+- `CloudWriter` only takes over Steam Cloud character saves made in play (never during shutdown / logout), one job at a time, steps strictly in order (.new → .old → .fch → read-back check → delete .new). Never call the game's FileHelpers / Splatform file API from anything but the main thread; Steam's async calls do the I/O.
 - `SkipRepeatSaveSec` may only skip the game's periodic saves (server request, timer), and only after a save that wrote the map and the logout point.
 - Recipe, forsaken power and skill triggers are ignored for 10 s after login (loading the character fires them).
 - Saves are not free (loading-screen push, Steam Cloud mount). Don't add triggers that fire per item or per frame. Merge them through `SaveScheduler.Request(reason, prio, wantLogout, delay)`.

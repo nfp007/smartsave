@@ -1,9 +1,9 @@
 {
   "name": "SmartSave",
   "author": "nfp007",
-  "version_number": "1.2.0",
+  "version_number": "1.3.0",
   "website_url": "https://github.com/nfp007/smartsave",
-  "description": "Don't lose progress when the game crashes. Saves your character after crafting, chest changes, tombstone recovery and before teleports, never moves your respawn point in combat, and makes every save much faster. Client-side.",
+  "description": "Don't lose progress when a game crashes. Saves your character after crafting, chests, tombstone and before teleports, never moves your respawn point in combat, and cuts the save freeze to ~20 ms, Steam Cloud included. Client-side.",
   "dependencies": [
     "denikson-BepInExPack_Valheim-5.4.2351"
   ]

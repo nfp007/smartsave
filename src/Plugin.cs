@@ -17,7 +17,7 @@ namespace SmartSave
     {
         public const string Guid = "nfp007.SmartSave";
         public const string Name = "SmartSave";
-        public const string Version = "1.2.0";
+        public const string Version = "1.3.0";
 
         internal static Plugin Instance;
         internal static ManualLogSource Log;
@@ -25,6 +25,7 @@ namespace SmartSave
         // [General]
         internal static ConfigEntry<bool> Enabled, LogSaves, FastMapSave;
         internal static ConfigEntry<float> MapPrewarmSec, SkipRepeatSaveSec;
+        internal static ConfigEntry<BackgroundWriteMode> BackgroundWrite;
         internal static ConfigEntry<SaveMessageMode> SaveMessage;
         internal static ConfigEntry<float> MinSaveIntervalSec;
         internal static ConfigEntry<KeyboardShortcut> ManualSaveKey;
@@ -71,8 +72,8 @@ namespace SmartSave
             MapSave = Config.Bind("General", "MapSave", MapSaveMode.OnPortal,
                 "When SmartSave's saves also write your explored map. The map is by far the slowest part of a save.\n" +
                 "Measured on a normal PC (with FastMapSave on): the map part of a save takes under 1 ms when the map is reused\n" +
-                "and ~50 ms right after exploring. Without FastMapSave it takes ~200 ms. A whole save takes ~20 ms with a local\n" +
-                "character and ~100-300 ms with a Steam Cloud character (the Steam Cloud file handling).\n" +
+                "and ~50 ms right after exploring. Without FastMapSave it takes ~200 ms. A whole save takes ~20 ms, with a local\n" +
+                "character and with a Steam Cloud character (BackgroundWrite on).\n" +
                 "  OnPortal = only the save right before a teleport writes the map (the screen fades out anyway).\n" +
                 "  Always   = every SmartSave save writes the map: nothing of the map is ever lost, but every save freezes.\n" +
                 "  Never    = SmartSave never writes the map.\n" +
@@ -93,6 +94,13 @@ namespace SmartSave
                 "in the background (a ~1-2 ms copy in the game, the rest on another CPU core). The next save that writes the map then\n" +
                 "takes ~1-2 ms for the map instead of ~50 ms. If nothing changed since the last save, the map is reused anyway.\n" +
                 "0 = off (the map is then prepared during the save itself).");
+            BackgroundWrite = Config.Bind("General", "BackgroundWrite", BackgroundWriteMode.CloudOnly,
+                "Steam Cloud characters: the save is made in the frame as always (all data captured at once), but writing it to\n" +
+                "Steam Cloud happens in the background through Steam's own background write. A Steam Cloud save then freezes the\n" +
+                "game much shorter. The game's safe order is kept (.new, .old, .fch). Quitting and logging out always wait for it.\n" +
+                "If Steam reports an error, the save is kept as a local backup (like the game does) and this switches itself off.\n" +
+                "  CloudOnly = Steam Cloud characters only (local characters already save fast).\n" +
+                "  Off       = the game's own cloud save.");
             SkipRepeatSaveSec = Config.Bind("General", "SkipRepeatSaveSec", 30f,
                 "Skip the game's own regular save (the server's save interval, or the game's 30-minute timer) if a full save\n" +
                 "(with the map and your position) already ran within this many seconds. It would write exactly the same again.\n" +
@@ -153,6 +161,7 @@ namespace SmartSave
             {
                 SaveProfiler.Tick();
                 FastMapData.Tick();
+                CloudWriter.Tick();
                 SaveScheduler.Tick();
             }
             catch (System.Exception e)
