@@ -17,7 +17,7 @@ namespace SmartSave
     {
         public const string Guid = "nfp007.SmartSave";
         public const string Name = "SmartSave";
-        public const string Version = "1.2.10";
+        public const string Version = "1.2.11";
 
         internal static Plugin Instance;
         internal static ManualLogSource Log;

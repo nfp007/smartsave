@@ -253,6 +253,9 @@ namespace SmartSave
             var call = SteamRemoteStorage.FileReadAsync(path, 0, (uint)size);
             if (call == SteamAPICall_t.Invalid) { _onRead = null; _readBuffer = null; Log("→ read " + path + ": Steam refused the request"); then(null); return; }
             Track(call, CallKind.Read, "read " + path);
+            // a fresh CallResult per request: Steamworks.NET unregisters a CallResult right after its callback returns,
+            // so re-using the same one for the next step from inside that callback loses the answer (test 1.2.10)
+            _readResult = CallResult<RemoteStorageFileReadAsyncComplete_t>.Create(OnReadComplete);
             _readResult.Set(call);
         }
 
@@ -283,6 +286,7 @@ namespace SmartSave
             var call = SteamRemoteStorage.FileWriteAsync(path, data, (uint)data.Length);
             if (call == SteamAPICall_t.Invalid) { _onWrite = null; Log("→ write " + path + ": Steam refused the request"); then(false); return; }
             Track(call, CallKind.Write, $"write {path} ({data.Length / 1024} KB)");
+            _writeResult = CallResult<RemoteStorageFileWriteAsyncComplete_t>.Create(OnWriteComplete); // fresh per request, see ReadAsync
             _writeResult.Set(call);
         }
 
@@ -317,14 +321,14 @@ namespace SmartSave
 
         /// <summary>
         /// Ask Steam directly about the request in flight. If Steam says it is finished but the callback hasn't
-        /// delivered the answer within 2 frames, fetch the result ourselves.
+        /// delivered the answer within 30 frames, fetch the result ourselves.
         /// </summary>
         private static void Poll()
         {
             _callFrames++;
             bool failed;
             if (!SteamUtils.IsAPICallCompleted(_call, out failed)) return;
-            if (++_completedSeenFrames < 3) return;
+            if (++_completedSeenFrames < 30) return; // the callback normally comes within a frame or two
             Log($"Steam reports {_callWhat} as finished, but the callback did not deliver it; asking Steam for the result");
             if (_kind == CallKind.Write)
             {
